@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+
+# TMPFILE needs to be in a place that flatpak has access
+TMPFILE=$(mktemp "$HOME/.local/state/enterflatpak.XXXXXX")
+
+usage() {
+    echo "$(basename $0) <flatpak>"
+    echo
+    echo "This script allows you to open a bash shell within a running flatpak."
+    echo "Works best with a color terminal since the shell prompt is changed."
+    echo
+    echo "example: $(basename $0) xtrkcad    # finds first app that matches and enters it"
+    exit 1
+}
+
+cleanup() {
+    trap - 0 1 2 3 15 21 22
+    rm -f "$TMPFILE"
+}
+
+trap cleanup 0 1 2 3 15 21 22
+
+if [ $# -lt 1 ]; then
+    usage
+fi
+
+FP=$1
+while read -r FPI FPA; do
+    if [[ "$FPA" == *"$FP"* ]]; then
+        break
+    fi
+    FPI=""
+done < <(flatpak ps --columns=instance,application)
+cat <<EOF >$TMPFILE
+PATH="/app/bin:/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin:."
+alias lc='ls -ACF --color=auto'
+set -o vi
+alias r='fc -e -'
+FP_VER=\$(grep "release.*version" /app/share/metainfo/*.metainfo.xml 2>/dev/null | head -1 | sed 's/.*version="//;s/".*//')
+if [ -z "\$FP_VER" ]; then
+    FP_VER=\$(grep -h "release.*version" /usr/share/metainfo/*metainfo.xml 2>/dev/null | sed -n 's/.*date="\([^"]*\)".*/\1 &/p' | sort -r | cut -d ' ' -f2- | head -1 | sed 's/.*version="//;s/".*//')
+fi
+EOF
+if [ -z "$FPI" ]; then
+    echo "No running instance found for flatpak: $FP" >&2
+    CNT_CHOICES=$(flatpak list --columns=application | grep "$FP" | wc -l)
+    FPA_OPTS=()
+    if [[ $CNT_CHOICES == 1 ]]; then
+        FPA=$(flatpak list --columns=application | grep "$FP")
+    else
+        PS3="Select flatpak to enter or q to quit: "
+        select FPA in $(flatpak list --columns=application,branch,arch,installation | awk '{printf("%s,%s,%s,%s\n",$1,$2,$3,$4)}' | grep "$FP" | sort -f); do
+            break
+        done
+        if [ -n "$FPA" ]; then
+            IFS=","
+            set $FPA
+            FPA_OPTS+=(--branch=$2)
+            FPA_OPTS+=(--arch=$3)
+            FPA_OPTS+=(--$4)
+            FPA=$1
+        fi
+    fi
+    if [ -z "$FPA" ]; then
+        exit 1
+    fi
+    echo "FP_PS1=\$(echo $FPA | sed 's/.*\.//')" >>$TMPFILE
+    echo "PS1=\"\\[\\e[1;33;41m\\](\${FP_PS1}-\$FP_VER) \$ \\[\\e[0m\\]\"" >>$TMPFILE
+    echo "Entering flatpak $FPA"
+    flatpak run --filesystem=home --filesystem=host-etc --device=all \
+        --share=network --share=ipc \
+        --socket=x11 --socket=wayland --socket=session-bus \
+        --command=bash ${FPA_OPTS[@]} $FPA --init-file $TMPFILE
+else
+    echo "Entering flatpak $FPA already running"
+    echo "FP_PS1=\$(echo $FPA | sed 's/.*\.//')" >>$TMPFILE
+    echo "PS1=\"\\[\\e[1;33;41m\\](\${FP_PS1}-\$FP_VER) \$ \\[\\e[0m\\]\"" >>$TMPFILE
+    #cat $TMPFILE
+    #set -x
+    flatpak enter $FPI bash --init-file $TMPFILE
+fi
