@@ -25,7 +25,9 @@ No running instance found for flatpak: freedesk
 Select flatpak to enter or q to quit: q
 ```
 
-Ok, that's a bit much, let's narrow it down to the Sdk:
+Note that the output includes multiple choices. What makes the list unique is the application name, its branch, the architecture, and whether or not installed on the system vs the user.
+
+In any event, the output is a bit much, let's narrow it down to the Sdk:
 
 ```
 $ enterflatpak freedesktop.Sdk
